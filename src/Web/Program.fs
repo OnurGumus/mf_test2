@@ -1,4 +1,4 @@
-module AppName._1.App
+module Web
 
 open System
 open System.IO
