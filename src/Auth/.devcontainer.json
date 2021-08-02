@@ -24,11 +24,11 @@
 
 	// Add the IDs of extensions you want installed when the container is created.
 	"extensions": [
-		"ms-dotnettools.csharp","ionide.ionide-fsharp","ionide.ionide-paket","ionide.ionide-fake","ionide.mechanic"
+		"ms-dotnettools.csharp"
 	],
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-   "forwardPorts": [6000, 6001],
+   "forwardPorts": [5010, 5011],
 
 	// [Optional] To reuse of your local HTTPS dev cert:
 	//
