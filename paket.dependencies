@@ -3,3 +3,5 @@ storage: none
 nuget FSharp.Core content: none
 nuget Giraffe 
 nuget Giraffe.DotLiquid 3.0.0-rc-1
+nuget System.Net.Http
+nuget Yarp.ReverseProxy

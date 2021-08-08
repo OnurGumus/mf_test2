@@ -1,3 +1,5 @@
 FSharp.Core
 Giraffe
 Giraffe.DotLiquid
+System.Net.Http
+Yarp.ReverseProxy
