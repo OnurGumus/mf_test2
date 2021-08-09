@@ -51,7 +51,8 @@ namespace Auth
                 app.UseHsts();
             }
 
-         //   app.UseHttpsRedirection();
+
+            //   app.UseHttpsRedirection();
             app.UseStaticFiles();
 
             app.UseRouting();
@@ -62,6 +63,7 @@ namespace Auth
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapRazorPages();
+                endpoints.MapDefaultControllerRoute();
             });
         }
     }

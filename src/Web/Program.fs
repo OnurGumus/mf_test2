@@ -84,13 +84,29 @@ let configureApp (app: IApplicationBuilder) =
 
     let transformer = CustomTransformer() // or HttpTransformer.Default;
 
-    let requestOptions =
-        ForwarderRequestConfig(Timeout = TimeSpan.FromSeconds(100.))
+    let requestOptions = ForwarderRequestConfig()
 
     let env =
         app.ApplicationServices.GetService<IWebHostEnvironment>()
 
     app
+        .Use(fun context next ->
+            task {
+                let cookies = context.Request.Headers.["Cookie"] |> Seq.tryHead
+                match cookies with 
+                | Some cookies ->
+                    let httpClient = new HttpClient()
+                    httpClient.DefaultRequestHeaders.Add("Cookie", cookies)
+                    let! response = httpClient.GetAsync("http://auth:5010/api/resource/")
+                    if response.IsSuccessStatusCode then
+                        let! result = response.Content.ReadAsStringAsync()
+                        context.Items.Add("user",  result)
+                        printf "%A" result
+                | _ -> ()
+                do! next.Invoke()
+                return ()
+            }
+            :> Task)
         .UseRouting()
         .UseEndpoints(fun endpoints ->
             endpoints.Map(
@@ -101,12 +117,11 @@ let configureApp (app: IApplicationBuilder) =
                                     let! _ =
                                         forwarder.SendAsync(
                                             httpContext,
-                                            "https://auth:5011/",
+                                            "http://auth:5010/",
                                             httpClient,
                                             requestOptions,
                                             transformer
                                         )
-
                                     return ()
                                 }))
             )
