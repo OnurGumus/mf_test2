@@ -19,6 +19,10 @@ namespace Auth.Pages
 
         public void OnGet()
         {
+            foreach (var h  in HttpContext.Request.Headers)
+            {
+                Console.WriteLine(h);
+            }
 
         }
     }

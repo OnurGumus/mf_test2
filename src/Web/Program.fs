@@ -15,6 +15,8 @@ open System.Net.Http
 open FSharp.Control.Tasks
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Http
+open Microsoft.Extensions.Primitives
+open Microsoft.AspNetCore.Http.Features
 
 // ---------------------------------
 // Web app
@@ -89,20 +91,46 @@ let configureApp (app: IApplicationBuilder) =
     let env =
         app.ApplicationServices.GetService<IWebHostEnvironment>()
 
+
     app
         .Use(fun context next ->
             task {
-                let cookies = context.Request.Headers.["Cookie"] |> Seq.tryHead
-                match cookies with 
+                let feature =
+                    context.Features.Get<IHttpResponseBodyFeature>()
+
+                let memStream = new MemoryStream()
+                let x = StreamResponseBodyFeature(memStream)
+                context.Features.Set<IHttpResponseBodyFeature>(x)
+                do! next.Invoke()
+                let streamReader  = new StreamReader(memStream)
+                memStream.Position <- 0L
+                let! text =  streamReader.ReadToEndAsync()
+
+                let mem: ReadOnlyMemory<byte> = ReadOnlyMemory<_>(memStream.ToArray())
+
+                let! _ = feature.Writer.WriteAsync(mem)
+                return ()
+            }
+            :> Task)
+        .Use(fun context next ->
+            task {
+                let cookies =
+                    context.Request.Headers.["Cookie"] |> Seq.tryHead
+
+                match cookies with
                 | Some cookies ->
                     let httpClient = new HttpClient()
                     httpClient.DefaultRequestHeaders.Add("Cookie", cookies)
+
                     let! response = httpClient.GetAsync("http://auth:5010/api/resource/")
+
                     if response.IsSuccessStatusCode then
                         let! result = response.Content.ReadAsStringAsync()
-                        context.Items.Add("user",  result)
+                        context.Items.Add("user", result)
+                        context.Request.Headers.Add("user", StringValues(result))
                         printf "%A" result
                 | _ -> ()
+
                 do! next.Invoke()
                 return ()
             }
@@ -122,6 +150,7 @@ let configureApp (app: IApplicationBuilder) =
                                             requestOptions,
                                             transformer
                                         )
+
                                     return ()
                                 }))
             )
