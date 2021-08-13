@@ -95,21 +95,31 @@ let configureApp (app: IApplicationBuilder) =
     app
         .Use(fun context next ->
             task {
-                let feature =
-                    context.Features.Get<IHttpResponseBodyFeature>()
+                let contentType = context.Request.ContentType
 
-                let memStream = new MemoryStream()
-                let x = StreamResponseBodyFeature(memStream)
-                context.Features.Set<IHttpResponseBodyFeature>(x)
-                do! next.Invoke()
-                let streamReader  = new StreamReader(memStream)
-                memStream.Position <- 0L
-                let! text =  streamReader.ReadToEndAsync()
+                if context.Request.Method = "GET"
+                   && contentType |> isNotNull
+                   && contentType.Contains "text/html" then
+                    let feature =
+                        context.Features.Get<IHttpResponseBodyFeature>()
 
-                let mem: ReadOnlyMemory<byte> = ReadOnlyMemory<_>(memStream.ToArray())
+                    let memStream = new MemoryStream()
+                    let x = StreamResponseBodyFeature(memStream)
+                    context.Features.Set<IHttpResponseBodyFeature>(x)
+                    do! next.Invoke()
+                    let streamReader = new StreamReader(memStream)
+                    memStream.Position <- 0L
 
-                let! _ = feature.Writer.WriteAsync(mem)
-                return ()
+                    let! text = streamReader.ReadToEndAsync()
+
+                    let mem: ReadOnlyMemory<byte> = ReadOnlyMemory<_>(memStream.ToArray())
+
+                    let! _ = feature.Writer.WriteAsync(mem)
+                    context.Features.Set<IHttpResponseBodyFeature>(feature)
+                    return ()
+                else
+                    do! next.Invoke()
+                    return ()
             }
             :> Task)
         .Use(fun context next ->
@@ -138,7 +148,7 @@ let configureApp (app: IApplicationBuilder) =
         .UseRouting()
         .UseEndpoints(fun endpoints ->
             endpoints.Map(
-                "/{**catch-all}",
+                "auth/{**catch}",
                 RequestDelegate
                     (fun httpContext ->
                         upcast (task {
