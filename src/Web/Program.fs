@@ -24,7 +24,9 @@ open Microsoft.AspNetCore.Http.Features
 
 let indexHandler (name: string) =
     let greetings = sprintf "Hello %s, from Giraffe!" name
-    let model = {| Text = greetings |}
+    let httpClient = new HttpClient()
+    let result = httpClient.GetAsync("http://auth:5010/auth").Result.Content.ReadAsStringAsync().Result
+    let model = {| Body = result |}
     dotLiquidHtmlTemplate "Views/Index.html" model
 
 let getAuth () = ()
@@ -32,7 +34,7 @@ let getAuth () = ()
 let webApp =
     choose [ GET
              >=> choose [ route "/" >=> indexHandler "world"
-                          routef "/hello/%s" indexHandler ]
+                          routef "/auth/%s" indexHandler ]
              setStatusCode 404 >=> text "Not Found" ]
 
 // ---------------------------------
@@ -93,80 +95,84 @@ let configureApp (app: IApplicationBuilder) =
 
 
     app
+        // .Use(fun context next ->
+        //     task {
+        //         let contentType = context.Request.ContentType
+
+        //         if context.Request.Method = "GET"
+        //            && contentType |> isNotNull
+        //            && contentType.Contains "text/html" then
+        //             let feature =
+        //                 context.Features.Get<IHttpResponseBodyFeature>()
+
+        //             let memStream = new MemoryStream()
+        //             let x = StreamResponseBodyFeature(memStream)
+        //             context.Features.Set<IHttpResponseBodyFeature>(x)
+        //             do! next.Invoke()
+        //             let streamReader = new StreamReader(memStream)
+        //             memStream.Position <- 0L
+
+        //             let! text = streamReader.ReadToEndAsync()
+
+        //             let mem: ReadOnlyMemory<byte> = ReadOnlyMemory<_>(memStream.ToArray())
+
+        //             let! _ = feature.Writer.WriteAsync(mem)
+        //             context.Features.Set<IHttpResponseBodyFeature>(feature)
+        //             return ()
+        //         else
+        //             do! next.Invoke()
+        //             return ()
+        //     }
+        //     :> Task)
         .Use(fun context next ->
             task {
-                let contentType = context.Request.ContentType
-
-                if context.Request.Method = "GET"
-                   && contentType |> isNotNull
-                   && contentType.Contains "text/html" then
-                    let feature =
-                        context.Features.Get<IHttpResponseBodyFeature>()
-
-                    let memStream = new MemoryStream()
-                    let x = StreamResponseBodyFeature(memStream)
-                    context.Features.Set<IHttpResponseBodyFeature>(x)
+                if context.Request.Path.Value.Contains "." then
                     do! next.Invoke()
-                    let streamReader = new StreamReader(memStream)
-                    memStream.Position <- 0L
-
-                    let! text = streamReader.ReadToEndAsync()
-
-                    let mem: ReadOnlyMemory<byte> = ReadOnlyMemory<_>(memStream.ToArray())
-
-                    let! _ = feature.Writer.WriteAsync(mem)
-                    context.Features.Set<IHttpResponseBodyFeature>(feature)
                     return ()
                 else
+                    let cookies =
+                        context.Request.Headers.["Cookie"] |> Seq.tryHead
+
+                    match cookies with
+                    | Some cookies ->
+                        let httpClient = new HttpClient()
+                        httpClient.DefaultRequestHeaders.Add("Cookie", cookies)
+
+                        let! response = httpClient.GetAsync("http://auth:5010/api/resource/")
+
+                        if response.IsSuccessStatusCode then
+                            let! result = response.Content.ReadAsStringAsync()
+                            context.Items.Add("user", result)
+                            context.Request.Headers.Add("user", StringValues(result))
+                            printf "%A" result
+                    | _ -> ()
                     do! next.Invoke()
                     return ()
             }
             :> Task)
-        .Use(fun context next ->
-            task {
-                let cookies =
-                    context.Request.Headers.["Cookie"] |> Seq.tryHead
+        
+        .UseWhen((fun context -> context.Request.Path.Value.Contains(".")), 
+            fun a -> 
+                    a.UseRouting()
+                        .UseEndpoints(fun endpoints ->
+                    endpoints.Map(
+                        "auth/{**catch}",
+                        RequestDelegate
+                            (fun httpContext ->
+                                upcast (task {
+                                            let! _ =
+                                                forwarder.SendAsync(
+                                                    httpContext,
+                                                    "http://auth:5010/",
+                                                    httpClient,
+                                                    requestOptions,
+                                                    transformer
+                                                )
 
-                match cookies with
-                | Some cookies ->
-                    let httpClient = new HttpClient()
-                    httpClient.DefaultRequestHeaders.Add("Cookie", cookies)
-
-                    let! response = httpClient.GetAsync("http://auth:5010/api/resource/")
-
-                    if response.IsSuccessStatusCode then
-                        let! result = response.Content.ReadAsStringAsync()
-                        context.Items.Add("user", result)
-                        context.Request.Headers.Add("user", StringValues(result))
-                        printf "%A" result
-                | _ -> ()
-
-                do! next.Invoke()
-                return ()
-            }
-            :> Task)
-        .UseRouting()
-        .UseEndpoints(fun endpoints ->
-            endpoints.Map(
-                "auth/{**catch}",
-                RequestDelegate
-                    (fun httpContext ->
-                        upcast (task {
-                                    let! _ =
-                                        forwarder.SendAsync(
-                                            httpContext,
-                                            "http://auth:5010/",
-                                            httpClient,
-                                            requestOptions,
-                                            transformer
-                                        )
-
-                                    return ()
-                                }))
-            )
-            |> ignore
-
-
+                                            return ()
+                                        }))
+                    )
+                    |> ignore) |> ignore
             )
     |> ignore
 
