@@ -25,7 +25,7 @@ open Microsoft.AspNetCore.Http.Features
 let indexHandler (name: string) =
     let greetings = sprintf "Hello %s, from Giraffe!" name
     let httpClient = new HttpClient()
-    let result = httpClient.GetAsync("http://auth:5010/auth").Result.Content.ReadAsStringAsync().Result
+    let result = httpClient.GetAsync("http://auth:5010/auth/" + name).Result.Content.ReadAsStringAsync().Result
     let model = {| Body = result |}
     dotLiquidHtmlTemplate "Views/Index.html" model
 
@@ -33,8 +33,9 @@ let getAuth () = ()
 //  let client = HttpClient
 let webApp =
     choose [ GET
-             >=> choose [ route "/" >=> indexHandler "world"
-                          routef "/auth/%s" indexHandler ]
+             >=> choose [ routexp "/auth/(.*)" (Seq.last >> indexHandler)
+                          route "/auth" >=> indexHandler ""
+                          route "/" >=> indexHandler "" ]
              setStatusCode 404 >=> text "Not Found" ]
 
 // ---------------------------------
