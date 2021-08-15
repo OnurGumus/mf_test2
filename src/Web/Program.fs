@@ -23,10 +23,10 @@ open Microsoft.AspNetCore.Http.Features
 // ---------------------------------
 
 let indexHandler (name: string) =
-    let greetings = sprintf "Hello %s, from Giraffe!" name
     let httpClient = new HttpClient()
-    let result = httpClient.GetAsync("http://auth:5010/auth/" + name).Result.Content.ReadAsStringAsync().Result
-    let model = {| Body = result |}
+    let header = httpClient.GetAsync("http://auth:5010/auth/header").Result.Content.ReadAsStringAsync().Result
+    let body = httpClient.GetAsync("http://auth:5010/auth/" + name).Result.Content.ReadAsStringAsync().Result
+    let model = {| Header = header; Body = body |}
     dotLiquidHtmlTemplate "Views/Index.html" model
 
 let getAuth () = ()
