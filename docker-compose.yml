@@ -9,8 +9,15 @@ services:
     command: /bin/sh -c "while sleep 1000; do :; done"
     links:
       - auth
-    # ...
 
+  app:
+    image: mcr.microsoft.com/vscode/devcontainers/dotnet:5.0
+    volumes:
+      # Mount the root folder that contains .git
+      - ${HOME}/.aspnet/https:/home/vscode/.aspnet/https
+      - .:/workspace:cached
+    command: /bin/sh -c "while sleep 1000; do :; done"
+    
   auth:
     image: mcr.microsoft.com/vscode/devcontainers/dotnet:5.0
     volumes:

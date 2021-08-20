@@ -22,20 +22,66 @@ open Microsoft.AspNetCore.Http.Features
 // Web app
 // ---------------------------------
 
-let indexHandler (name: string) =
+let authHandler (name: string) =
     let httpClient = new HttpClient()
-    let header = httpClient.GetAsync("http://auth:5010/auth/header").Result.Content.ReadAsStringAsync().Result
-    let body = httpClient.GetAsync("http://auth:5010/auth/" + name).Result.Content.ReadAsStringAsync().Result
+
+    let header =
+        httpClient
+            .GetAsync(
+                "http://auth:5010/auth/header"
+            )
+            .Result
+            .Content
+            .ReadAsStringAsync()
+            .Result
+
+    let body =
+        httpClient
+            .GetAsync(
+                "http://auth:5010/auth/" + name
+            )
+            .Result
+            .Content
+            .ReadAsStringAsync()
+            .Result
+
     let model = {| Header = header; Body = body |}
     dotLiquidHtmlTemplate "Views/Index.html" model
 
+let appHandler (name: string) =
+    let httpClient = new HttpClient()
+
+    let header =
+        httpClient
+            .GetAsync(
+                "http://auth:5010/auth/header"
+            )
+            .Result
+            .Content
+            .ReadAsStringAsync()
+            .Result
+
+    let body =
+        httpClient
+            .GetAsync(
+                "http://app:5020/app/" + name
+            )
+            .Result
+            .Content
+            .ReadAsStringAsync()
+            .Result
+
+    let model = {| Header = header; Body = body |}
+    dotLiquidHtmlTemplate "Views/Index.html" model
 let getAuth () = ()
 //  let client = HttpClient
 let webApp =
     choose [ GET
-             >=> choose [ routexp "/auth/(.*)" (Seq.last >> indexHandler)
-                          route "/auth" >=> indexHandler ""
-                          route "/" >=> indexHandler "" ]
+             >=> choose [ routexp "/auth/(.*)" (Seq.last >> authHandler)
+                          route "/auth" >=> authHandler ""
+                          routexp "/app/(.*)" (Seq.last >> appHandler)
+                          route "/app" >=> appHandler ""
+                          route "/" >=> authHandler "" ]
              setStatusCode 404 >=> text "Not Found" ]
 
 // ---------------------------------
@@ -94,6 +140,16 @@ let configureApp (app: IApplicationBuilder) =
     let env =
         app.ApplicationServices.GetService<IWebHostEnvironment>()
 
+    let staticContent (context: HttpContext) =
+        context.Request.Path.Value.Contains(".")
+
+    let forwardPredicate (context: HttpContext) =
+        staticContent (context)
+        || context.Request.Method <> "GET"
+        || context.Request.Headers.ContainsKey("Connection")
+        || context.Request.ContentType = "application/json"
+        || (context.Request.ContentType |> isNotNull
+            && context.Request.ContentType.Contains("form"))
 
     app
         // .Use(fun context next ->
@@ -125,56 +181,78 @@ let configureApp (app: IApplicationBuilder) =
         //             return ()
         //     }
         //     :> Task)
-        .Use(fun context next ->
-            task {
-                if context.Request.Path.Value.Contains "." then
-                    do! next.Invoke()
-                    return ()
-                else
-                    let cookies =
-                        context.Request.Headers.["Cookie"] |> Seq.tryHead
+        .UseWhen(
+            (Func<_, _>(staticContent)),
+            fun a ->
+                a.Use
+                    (fun context next ->
+                        task {
+                            let cookies =
+                                context.Request.Headers.["Cookie"] |> Seq.tryHead
 
-                    match cookies with
-                    | Some cookies ->
-                        let httpClient = new HttpClient()
-                        httpClient.DefaultRequestHeaders.Add("Cookie", cookies)
+                            match cookies with
+                            | Some cookies ->
+                                let httpClient = new HttpClient()
+                                httpClient.DefaultRequestHeaders.Add("Cookie", cookies)
 
-                        let! response = httpClient.GetAsync("http://auth:5010/api/resource/")
+                                let! response = httpClient.GetAsync("http://auth:5010/api/resource/")
 
-                        if response.IsSuccessStatusCode then
-                            let! result = response.Content.ReadAsStringAsync()
-                            context.Items.Add("user", result)
-                            context.Request.Headers.Add("user", StringValues(result))
-                            printf "%A" result
-                    | _ -> ()
-                    do! next.Invoke()
-                    return ()
-            }
-            :> Task)
-        
-        .UseWhen((fun context -> context.Request.Path.Value.Contains(".")), 
-            fun a -> 
-                    a.UseRouting()
-                        .UseEndpoints(fun endpoints ->
-                    endpoints.Map(
-                        "auth/{**catch}",
-                        RequestDelegate
-                            (fun httpContext ->
-                                upcast (task {
-                                            let! _ =
-                                                forwarder.SendAsync(
-                                                    httpContext,
-                                                    "http://auth:5010/",
-                                                    httpClient,
-                                                    requestOptions,
-                                                    transformer
-                                                )
+                                if response.IsSuccessStatusCode then
+                                    let! result = response.Content.ReadAsStringAsync()
+                                    context.Items.Add("user", result)
+                                    context.Request.Headers.Add("user", StringValues(result))
+                            | _ -> ()
 
-                                            return ()
-                                        }))
-                    )
-                    |> ignore) |> ignore
-            )
+                            do! next.Invoke()
+                            return ()
+                        }
+                        :> Task)
+                |> ignore
+        )
+
+        .UseWhen(
+            (Func<_, _>(forwardPredicate)),
+            fun a ->
+                a
+                    .UseRouting()
+                    .UseEndpoints(fun endpoints ->
+                        endpoints.Map(
+                            "auth/{**catch}",
+                            RequestDelegate
+                                (fun httpContext ->
+                                    upcast (task {
+                                                let! _ =
+                                                    forwarder.SendAsync(
+                                                        httpContext,
+                                                        "http://auth:5010/",
+                                                        httpClient,
+                                                        requestOptions,
+                                                        transformer
+                                                    )
+
+                                                return ()
+                                            }))
+                        )|>ignore
+                        endpoints.Map(
+                            "app/{**catch}",
+                            RequestDelegate
+                                (fun httpContext ->
+                                    upcast (task {
+                                                let! _ =
+                                                    forwarder.SendAsync(
+                                                        httpContext,
+                                                        "http://app:5020/",
+                                                        httpClient,
+                                                        requestOptions,
+                                                        transformer
+                                                    )
+
+                                                return ()
+                                            }))
+                        )
+                        |> ignore)
+                |> ignore
+        )
     |> ignore
 
     (match env.IsDevelopment() with
