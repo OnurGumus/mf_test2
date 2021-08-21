@@ -23,11 +23,13 @@ open Microsoft.AspNetCore.Http.Features
 
 
 let webApp =
-    choose [ GET >=> 
-                choose [
-                    route "/my-component" >=> htmlFile "wwwroot/my-component.html"
+    choose [ GET
+             >=> choose [ route "/my-component"
+                          >=> htmlFile "wwwroot/my-component.html"
+                          route "/another"
+                          >=> htmlFile "wwwroot/another.html"
 
-                            ]
+                           ]
              setStatusCode 404 >=> text "Not Found" ]
 
 // ---------------------------------
@@ -54,7 +56,8 @@ let configureCors (builder: CorsPolicyBuilder) =
 
 
 let configureApp (app: IApplicationBuilder) =
-    app.UsePathBase(PathString "/app")|>ignore
+    app.UsePathBase(PathString "/app") |> ignore
+
     let env =
         app.ApplicationServices.GetService<IWebHostEnvironment>()
 
@@ -63,11 +66,11 @@ let configureApp (app: IApplicationBuilder) =
 
     (match env.IsDevelopment() with
      | true -> app.UseDeveloperExceptionPage()
-     | false ->
-         app
-             .UseGiraffeErrorHandler(errorHandler))
-          //   .UseHttpsRedirection())
-        .UseCors(configureCors)
+     | false -> app.UseGiraffeErrorHandler(errorHandler))
+        //   .UseHttpsRedirection())
+        .UseCors(
+            configureCors
+        )
         .UseStaticFiles()
         .UseGiraffe(webApp)
 
