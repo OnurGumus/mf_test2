@@ -12,7 +12,9 @@ using Auth.Data;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using System.Text;
 namespace Auth
 {
     public class Startup
@@ -27,6 +29,7 @@ namespace Auth
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
+
             services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseSqlite(
                     Configuration.GetConnectionString("DefaultConnection")));
@@ -37,8 +40,20 @@ namespace Auth
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILoggerFactory loggerFactory)
         {
+             app.Use(async (context, next) =>
+            {
+                 var logger = loggerFactory.CreateLogger("Request Headers");
+                var builder = new StringBuilder(Environment.NewLine);
+                foreach (var header in context.Request.Headers)
+                {
+                    builder.AppendLine($"{header.Key}:{header.Value}");
+                }
+                Console.WriteLine(builder.ToString());
+                logger.LogTrace(builder.ToString());
+                await next.Invoke();
+            });
             app.UsePathBase("/auth");
             if (env.IsDevelopment())
             {

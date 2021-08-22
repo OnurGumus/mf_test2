@@ -17,18 +17,25 @@ open System.Threading.Tasks
 open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.Primitives
 open Microsoft.AspNetCore.Http.Features
+open System.Net
+open System.Text
 
 // ---------------------------------
 // Web app
 // ---------------------------------
 
-let authHandler (name: string) =
-    let httpClient = new HttpClient()
+let authHandler (name: string) (context: HttpContext) : HttpHandler =
+    let cookieColl = context.Request.Cookies
+    let baseAddress = Uri("http://auth:5010")
+    use handler = new HttpClientHandler()
+
+    let httpClient =
+        new HttpClient(handler, BaseAddress = baseAddress)
 
     let header =
         httpClient
             .GetAsync(
-                "http://auth:5010/auth/header"
+                "/auth/header"
             )
             .Result
             .Content
@@ -36,14 +43,42 @@ let authHandler (name: string) =
             .Result
 
     let body =
-        httpClient
-            .GetAsync(
-                "http://auth:5010/auth/" + name
-            )
-            .Result
-            .Content
-            .ReadAsStringAsync()
-            .Result
+        if context.Request.Method = "GET" then
+            let result = httpClient.GetAsync("/auth/" + name).Result
+
+            match result.Headers.TryGetValues("Set-Cookie") with
+            | true, cookie -> context.Response.Headers.Add("Set-Cookie", StringValues(cookie |> Seq.toArray))
+            | _ -> ()  
+
+            result.Content
+                .ReadAsStringAsync()
+                .Result
+        else
+            let cookies =
+                match context.Request.Headers.TryGetValue("Cookie") with
+                | true, cookies -> cookies
+                | _ -> StringValues.Empty
+
+            let request =
+                new HttpRequestMessage(RequestUri = Uri("http://auth:5010/auth/" + name), 
+                    Method = HttpMethod.Post)
+            use streamReader = new StreamReader(context.Request.Body)
+            let str = streamReader.ReadToEndAsync().Result
+            let body = new StringContent(str,  Encoding.UTF8, context.Request.ContentType )
+            request.Content <- body
+            cookies
+            |> Seq.iter (fun x -> request.Headers.Add("Cookie", x))
+
+            let res = httpClient.SendAsync(request).Result
+          
+            match res.Headers.TryGetValues("Set-Cookie") with
+            | true, cookie -> context.Response.Headers.Add("Set-Cookie", StringValues(cookie |> Seq.toArray))
+            | _ -> ()
+            //   let cookies = cookieContainer.GetCookies(baseAddress)
+
+            //  cookies|> Seq.iter (fun x -> context.Response.Cookies.Append(x.Name,x.Value))
+            res.Content.ReadAsStringAsync().Result
+
 
     let model = {| Header = header; Body = body |}
     dotLiquidHtmlTemplate "Views/Index.html" model
@@ -73,15 +108,23 @@ let appHandler (name: string) =
 
     let model = {| Header = header; Body = body |}
     dotLiquidHtmlTemplate "Views/Index.html" model
+
 let getAuth () = ()
 //  let client = HttpClient
+
+let POST_GET: HttpHandler = choose [ POST; GET ]
+
 let webApp =
-    choose [ GET
-             >=> choose [ routexp "/auth/(.*)" (Seq.last >> authHandler)
-                          route "/auth" >=> authHandler ""
+    choose [ POST_GET
+             >=> choose [ routexp
+                              "/auth/(.*)"
+                              (fun s -> (fun x context -> (authHandler (s |> Seq.last) context) x context))
+                          route "/auth"
+                          >=> (fun x context -> (authHandler "" context) x context)
                           routexp "/app/(.*)" (Seq.last >> appHandler)
                           route "/app" >=> appHandler ""
-                          route "/" >=> authHandler "" ]
+                          route "/"
+                          >=> (fun x context -> (authHandler "" context) x context) ]
              setStatusCode 404 >=> text "Not Found" ]
 
 // ---------------------------------
@@ -140,16 +183,22 @@ let configureApp (app: IApplicationBuilder) =
     let env =
         app.ApplicationServices.GetService<IWebHostEnvironment>()
 
+    let isFormPost (context: HttpContext) =
+        context.Request.Headers.ContainsKey("content-type")
+        && context.Request.Headers.["content-type"].[0]
+            .Contains("form")
+
     let staticContent (context: HttpContext) =
         context.Request.Path.Value.Contains(".")
 
     let forwardPredicate (context: HttpContext) =
-        staticContent (context)
-        || context.Request.Method <> "GET"
-        || context.Request.Headers.ContainsKey("Connection")
-        || context.Request.ContentType = "application/json"
-        || (context.Request.ContentType |> isNotNull
-            && context.Request.ContentType.Contains("form"))
+        (not (isFormPost context))
+        && (staticContent (context)
+            || context.Request.Method <> "GET"
+            || context.Request.Headers.ContainsKey("Connection")
+            || context.Request.ContentType = "application/json"
+            || (context.Request.ContentType |> isNotNull
+                && context.Request.ContentType.Contains("form")))
 
     app
         // .Use(fun context next ->
@@ -221,18 +270,26 @@ let configureApp (app: IApplicationBuilder) =
                             RequestDelegate
                                 (fun httpContext ->
                                     upcast (task {
-                                                let! _ =
+                                                let! error =
                                                     forwarder.SendAsync(
                                                         httpContext,
                                                         "http://auth:5010/",
                                                         httpClient,
                                                         requestOptions,
-                                                        transformer
+                                                        HttpTransformer.Default
                                                     )
+
+                                                if (error <> ForwarderError.None) then
+                                                    let errorFeature = httpContext.GetForwarderErrorFeature()
+                                                    let ex = errorFeature.Exception
+                                                    printf "%A" ex
+                                                    ()
 
                                                 return ()
                                             }))
-                        )|>ignore
+                        )
+                        |> ignore
+
                         endpoints.Map(
                             "app/{**catch}",
                             RequestDelegate
@@ -244,7 +301,7 @@ let configureApp (app: IApplicationBuilder) =
                                                         "http://app:5020/",
                                                         httpClient,
                                                         requestOptions,
-                                                        transformer
+                                                        HttpTransformer.Default
                                                     )
 
                                                 return ()
