@@ -19,14 +19,7 @@
     </main>
     <script type="module">
       
-
-     
         const appContent = document.querySelector("main");
-
-        const routes = {
-
-            "/app/": "decide-product-porsche",
-        };
 
         function findComponentName(pathname) {
             const prefix = Object.keys(routes).find(key =>
@@ -52,12 +45,6 @@
                         console.error('Error:', error);
                     });
             }
-            // const next = findComponentName(location.pathname);
-            // const current = appContent.firstChild;
-            // if (current.nodeName.toLowerCase() !== next) {
-            //     const newComponent = document.createElement(next);
-            //     appContent.replaceChild(newComponent, current);
-            // }
         }
 
         const appHistory = window.History.createBrowserHistory();
@@ -71,7 +58,6 @@
                     appHistory.push(href);
                     e.preventDefault();
                 }
-
             }
         });
     </script>
