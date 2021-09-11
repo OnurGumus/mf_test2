@@ -1,17 +1,80 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="/auth/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="/auth/css/site.css" />
+    <script src="https://unpkg.com/history@4.9.0"></script>
     <script src="/app/my-component.js"></script>
     <script src="/app/another.js"></script>
 </head>
 
 <body>
     {{header}}
-    {{body}}
+    <a href="/app/my-component">My compon</a>
+    <main>
+        {{body}}
+    </main>
+    <script type="module">
+      
+
+     
+        const appContent = document.querySelector("main");
+
+        const routes = {
+
+            "/app/": "decide-product-porsche",
+        };
+
+        function findComponentName(pathname) {
+            const prefix = Object.keys(routes).find(key =>
+                pathname.startsWith(key)
+            );
+            return routes[prefix];
+        }
+
+        function updatePageComponent(location) {
+            const path = location.pathname;
+            if (path.startsWith("/app/")) {
+                fetch(path, {
+                    method: 'GET', // or 'PUT'
+                    headers: {
+                        'x-direct': true,
+                    },
+                })
+                    .then(response => response.text())
+                    .then(data => {
+                        appContent.innerHTML = data;
+                    })
+                    .catch((error) => {
+                        console.error('Error:', error);
+                    });
+            }
+            // const next = findComponentName(location.pathname);
+            // const current = appContent.firstChild;
+            // if (current.nodeName.toLowerCase() !== next) {
+            //     const newComponent = document.createElement(next);
+            //     appContent.replaceChild(newComponent, current);
+            // }
+        }
+
+        const appHistory = window.History.createBrowserHistory();
+        appHistory.listen(updatePageComponent);
+        updatePageComponent(window.location);
+
+        document.addEventListener("click", e => {
+            if (e.target.tagName === "A") {
+                const href = e.target.getAttribute("href");
+                if (href.startsWith("/app/")){
+                    appHistory.push(href);
+                    e.preventDefault();
+                }
+
+            }
+        });
+    </script>
 
 </body>
 

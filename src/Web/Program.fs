@@ -188,10 +188,16 @@ let configureApp (app: IApplicationBuilder) =
         && context.Request.Headers.["content-type"].[0]
             .Contains("form")
 
+    let isDirect (context: HttpContext) =
+        context.Request.Headers.ContainsKey("x-direct")
+        // && context.Request.Headers.["content-type"].[0]
+        //     .Contains("true")
+
     let staticContent (context: HttpContext) =
         context.Request.Path.Value.Contains(".")
 
     let forwardPredicate (context: HttpContext) =
+        isDirect(context) ||
         (not (isFormPost context))
         && (staticContent (context)
             || context.Request.Method <> "GET"
