@@ -7,8 +7,7 @@
     <link rel="stylesheet" href="/auth/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="/auth/css/site.css" />
     <script src="https://unpkg.com/history@4.9.0"></script>
-    <script src="/app/my-component.js"></script>
-    <script src="/app/another.js"></script>
+
 </head>
 
 <body>
@@ -27,8 +26,15 @@
             );
             return routes[prefix];
         }
+        
+    
+ 
+  
 
         function updatePageComponent(location) {
+            if(document.readyState !== "complete"){
+                return;
+            }
             const path = location.pathname;
             if (path.startsWith("/app/")) {
                 fetch(path, {
@@ -42,7 +48,7 @@
                         appContent.innerHTML = data;
                     })
                     .catch((error) => {
-                        console.error('Error:', error);
+                        console.error('Errord:', error);
                     });
             }
         }
@@ -61,7 +67,8 @@
             }
         });
     </script>
-
+    <script src="/app/my-component.js"></script>
+    <script src="/app/another.js"></script>
 </body>
 
 </html>
