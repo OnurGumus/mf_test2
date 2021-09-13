@@ -110,8 +110,14 @@ let rec authHandler (name: string) (context: HttpContext) (cookie: StringValues 
         dotLiquidHtmlTemplate "Views/Index.html" model
     | Cookie c -> authHandler "" context (Some c)
 
-let appHandler (name: string) =
+let appHandler (name: string) (context: HttpContext) =
     let httpClient = new HttpClient()
+    match context.Request.Headers.TryGetValue("Cookie") with
+                | true, cookies -> cookies  |> Seq.iter (fun x -> httpClient.DefaultRequestHeaders.Add("Cookie", x))
+                | _ -> ()
+    match context.Items.TryGetValue("x-user") with
+    | true, user -> httpClient.DefaultRequestHeaders.Add("x-user", string user)
+    | _ -> ()
 
     let header =
         httpClient
@@ -148,8 +154,8 @@ let webApp =
                               (fun s -> (fun x context -> (authHandler (s |> Seq.last) context None) x context))
                           route "/auth"
                           >=> (fun x context -> (authHandler "" context None) x context)
-                          routexp "/app/(.*)" (Seq.last >> appHandler)
-                          route "/app" >=> appHandler ""
+                          routexp "/app/(.*)"  (fun s -> (fun x context -> (appHandler (s |> Seq.last) context) x context))
+                          route "/app" >=> (fun x context -> (appHandler "" context) x context)
                           route "/"
                           >=> (fun x context -> (authHandler "" context None) x context) ]
              setStatusCode 404 >=> text "Not Found" ]
