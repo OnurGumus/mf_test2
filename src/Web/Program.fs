@@ -24,13 +24,29 @@ open System.Text
 // Web app
 // ---------------------------------
 
-let authHandler (name: string) (context: HttpContext) : HttpHandler =
+type BodyOrCookie =
+    | Body of string
+    | Cookie of StringValues
+
+let rec authHandler (name: string) (context: HttpContext) (cookie: StringValues option) : HttpHandler =
     let cookieColl = context.Request.Cookies
     let baseAddress = Uri("http://auth:5010")
-    use handler = new HttpClientHandler()
+
+    
+    use handler =
+        new HttpClientHandler(AllowAutoRedirect = false)
 
     let httpClient =
         new HttpClient(handler, BaseAddress = baseAddress)
+
+    match cookie with
+    | Some c ->
+        c
+        |> Seq.iter (fun x -> httpClient.DefaultRequestHeaders.Add("Cookie", x))
+    | _ -> 
+        match context.Request.Headers.TryGetValue("Cookie") with
+                | true, cookies -> cookies  |> Seq.iter (fun x -> httpClient.DefaultRequestHeaders.Add("Cookie", x))
+                | _ -> ()
 
     let header =
         httpClient
@@ -42,17 +58,16 @@ let authHandler (name: string) (context: HttpContext) : HttpHandler =
             .ReadAsStringAsync()
             .Result
 
-    let body =
+    let body: BodyOrCookie =
         if context.Request.Method = "GET" then
-            let result = httpClient.GetAsync("/auth/" + name).Result
+            let result =
+                httpClient.GetAsync("/auth/" + name).Result
 
             match result.Headers.TryGetValues("Set-Cookie") with
             | true, cookie -> context.Response.Headers.Add("Set-Cookie", StringValues(cookie |> Seq.toArray))
-            | _ -> ()  
+            | _ -> ()
 
-            result.Content
-                .ReadAsStringAsync()
-                .Result
+            result.Content.ReadAsStringAsync().Result |> Body
         else
             let cookies =
                 match context.Request.Headers.TryGetValue("Cookie") with
@@ -60,28 +75,40 @@ let authHandler (name: string) (context: HttpContext) : HttpHandler =
                 | _ -> StringValues.Empty
 
             let request =
-                new HttpRequestMessage(RequestUri = Uri("http://auth:5010/auth/" + name), 
-                    Method = HttpMethod.Post)
+                new HttpRequestMessage(RequestUri = Uri("http://auth:5010/auth/" + name), Method = HttpMethod.Post)
+
             use streamReader = new StreamReader(context.Request.Body)
             let str = streamReader.ReadToEndAsync().Result
-            let body = new StringContent(str,  Encoding.UTF8, context.Request.ContentType )
+
+            let body =
+                new StringContent(str, Encoding.UTF8, context.Request.ContentType)
+
             request.Content <- body
+
             cookies
             |> Seq.iter (fun x -> request.Headers.Add("Cookie", x))
 
             let res = httpClient.SendAsync(request).Result
-          
-            match res.Headers.TryGetValues("Set-Cookie") with
-            | true, cookie -> context.Response.Headers.Add("Set-Cookie", StringValues(cookie |> Seq.toArray))
-            | _ -> ()
+
+            let cookie =
+                match res.Headers.TryGetValues("Set-Cookie") with
+                | true, cookie ->
+                    context.Response.Headers.Add("Set-Cookie", StringValues(cookie |> Seq.toArray))
+                    Some(StringValues(cookie |> Seq.toArray))
+                | _ -> None
             //   let cookies = cookieContainer.GetCookies(baseAddress)
+            match res.StatusCode with
+            | HttpStatusCode.Found -> Cookie(cookie.Value)
+            | _ ->
 
-            //  cookies|> Seq.iter (fun x -> context.Response.Cookies.Append(x.Name,x.Value))
-            res.Content.ReadAsStringAsync().Result
+                //  cookies|> Seq.iter (fun x -> context.Response.Cookies.Append(x.Name,x.Value))
+                Body(res.Content.ReadAsStringAsync().Result)
 
-
-    let model = {| Header = header; Body = body |}
-    dotLiquidHtmlTemplate "Views/Index.html" model
+    match body with
+    | Body str ->
+        let model = {| Header = header; Body = str |}
+        dotLiquidHtmlTemplate "Views/Index.html" model
+    | Cookie c -> authHandler "" context (Some c)
 
 let appHandler (name: string) =
     let httpClient = new HttpClient()
@@ -118,13 +145,13 @@ let webApp =
     choose [ POST_GET
              >=> choose [ routexp
                               "/auth/(.*)"
-                              (fun s -> (fun x context -> (authHandler (s |> Seq.last) context) x context))
+                              (fun s -> (fun x context -> (authHandler (s |> Seq.last) context None) x context))
                           route "/auth"
-                          >=> (fun x context -> (authHandler "" context) x context)
+                          >=> (fun x context -> (authHandler "" context None) x context)
                           routexp "/app/(.*)" (Seq.last >> appHandler)
                           route "/app" >=> appHandler ""
                           route "/"
-                          >=> (fun x context -> (authHandler "" context) x context) ]
+                          >=> (fun x context -> (authHandler "" context None) x context) ]
              setStatusCode 404 >=> text "Not Found" ]
 
 // ---------------------------------
@@ -190,21 +217,21 @@ let configureApp (app: IApplicationBuilder) =
 
     let isDirect (context: HttpContext) =
         context.Request.Headers.ContainsKey("x-direct")
-        // && context.Request.Headers.["content-type"].[0]
-        //     .Contains("true")
+    // && context.Request.Headers.["content-type"].[0]
+    //     .Contains("true")
 
     let staticContent (context: HttpContext) =
         context.Request.Path.Value.Contains(".")
 
     let forwardPredicate (context: HttpContext) =
-        isDirect(context) ||
-        (not (isFormPost context))
-        && (staticContent (context)
-            || context.Request.Method <> "GET"
-            || context.Request.Headers.ContainsKey("Connection")
-            || context.Request.ContentType = "application/json"
-            || (context.Request.ContentType |> isNotNull
-                && context.Request.ContentType.Contains("form")))
+        isDirect (context)
+        || (not (isFormPost context))
+           && (staticContent (context)
+               || context.Request.Method <> "GET"
+               || context.Request.Headers.ContainsKey("Connection")
+               || context.Request.ContentType = "application/json"
+               || (context.Request.ContentType |> isNotNull
+                   && context.Request.ContentType.Contains("form")))
 
     app
         // .Use(fun context next ->
@@ -237,7 +264,7 @@ let configureApp (app: IApplicationBuilder) =
         //     }
         //     :> Task)
         .UseWhen(
-            (Func<_, _>(staticContent)),
+            (Func<_, _>(staticContent >> not)),
             fun a ->
                 a.Use
                     (fun context next ->
@@ -254,8 +281,8 @@ let configureApp (app: IApplicationBuilder) =
 
                                 if response.IsSuccessStatusCode then
                                     let! result = response.Content.ReadAsStringAsync()
-                                    context.Items.Add("user", result)
-                                    context.Request.Headers.Add("user", StringValues(result))
+                                    context.Items.Add("x-user", result)
+                                    context.Request.Headers.Add("x-user", StringValues(result))
                             | _ -> ()
 
                             do! next.Invoke()

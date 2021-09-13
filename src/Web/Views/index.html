@@ -39,6 +39,7 @@
             if (path.startsWith("/app/")) {
                 fetch(path, {
                     method: 'GET', // or 'PUT'
+                    credentials: 'same-origin',
                     headers: {
                         'x-direct': true,
                     },

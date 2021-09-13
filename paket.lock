@@ -389,4 +389,4 @@ NUGET
       System.Reflection.Emit.Lightweight (>= 4.3) - restriction: || (&& (>= net45) (< netstandard2.0)) (&& (< net45) (>= netstandard2.0)) (>= net47)
       System.Threading.Tasks.Extensions (>= 4.4) - restriction: || (&& (>= net45) (< netstandard2.0)) (&& (< net45) (>= netstandard2.0)) (>= net47)
       System.ValueTuple (>= 4.4) - restriction: || (&& (>= net45) (< netstandard2.0)) (&& (< net45) (>= netstandard2.0)) (>= net47)
-    Yarp.ReverseProxy (1.0.0-preview.12.21328.2)
+    Yarp.ReverseProxy (1.0.0-preview.12.21451.3)

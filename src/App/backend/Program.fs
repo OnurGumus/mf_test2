@@ -15,17 +15,24 @@ open System.Threading.Tasks
 open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.Primitives
 open Microsoft.AspNetCore.Http.Features
+open Giraffe.DotLiquid
 
 // ---------------------------------
 // Web app
 // ---------------------------------
 
-
+let myComp (name:string) =
+    dotLiquidHtmlTemplate "wwwroot/my-component.html" {|Name = name|}
 
 let webApp =
     choose [ GET
              >=> choose [ route "/my-component"
-                          >=> htmlFile "wwwroot/my-component.html"
+                          >=>  (fun x context ->
+                            let name = 
+                                match context.Request.Headers.TryGetValue("x-user") with
+                                | true , name-> name.[0]
+                                | _ -> "anonymous"
+                            (myComp name) x context)
                           route "/another"
                           >=> htmlFile "wwwroot/another.html"
 
