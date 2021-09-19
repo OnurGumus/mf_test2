@@ -15,6 +15,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System.Text;
+using Microsoft.AspNetCore.Identity.UI.Services;
+using WebPWrecover.Services;
 namespace Auth
 {
     public class Startup
@@ -40,6 +42,11 @@ namespace Auth
             services.AddDefaultIdentity<IdentityUser>(options => options.SignIn.RequireConfirmedAccount = true)
                 .AddEntityFrameworkStores<ApplicationDbContext>();
             services.AddRazorPages();
+            // requires
+
+    services.AddTransient<IEmailSender, EmailSender>();
+    
+        services.Configure<AuthMessageSenderOptions>(Configuration);
 
         }
 

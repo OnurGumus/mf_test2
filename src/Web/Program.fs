@@ -24,11 +24,11 @@ open System.Text
 // Web app
 // ---------------------------------
 
-type BodyOrCookie =
+type ReturnOrRedirect =
     | Body of string
-    | Cookie of StringValues
+    | Redirect of cookie:StringValues option * url:String
 
-let rec authHandler (name: string) (context: HttpContext) (cookie: StringValues option) : HttpHandler =
+let rec authHandler (name: string) (context: HttpContext) (cookie: StringValues option) (method : string option) : HttpHandler =
     let cookieColl = context.Request.Cookies
     let baseAddress = Uri("http://auth:5010")
 
@@ -48,26 +48,24 @@ let rec authHandler (name: string) (context: HttpContext) (cookie: StringValues 
                 | true, cookies -> cookies  |> Seq.iter (fun x -> httpClient.DefaultRequestHeaders.Add("Cookie", x))
                 | _ -> ()
 
-    let header =
-        httpClient
-            .GetAsync(
-                "/auth/header"
-            )
-            .Result
-            .Content
-            .ReadAsStringAsync()
-            .Result
-
-    let body: BodyOrCookie =
-        if context.Request.Method = "GET" then
+    
+    let method =  method |> Option.defaultValue (context.Request.Method)
+    let body: ReturnOrRedirect =
+        if method = "GET" then
             let result =
                 httpClient.GetAsync("/auth/" + name).Result
+            let cookie = 
+                match result.Headers.TryGetValues("Set-Cookie") with
+                | true, cookie -> Some(StringValues(cookie |> Seq.toArray))
+                | _ -> None
+            match result.StatusCode with
+            |HttpStatusCode.Found ->  Redirect(cookie,result.Headers.Location.OriginalString.Replace("/auth/","").Replace("/auth","") )
+            | _ ->
+                match cookie with
+                | Some cookie -> context.Response.Headers.Add("Set-Cookie", cookie)
+                | _ -> ()
 
-            match result.Headers.TryGetValues("Set-Cookie") with
-            | true, cookie -> context.Response.Headers.Add("Set-Cookie", StringValues(cookie |> Seq.toArray))
-            | _ -> ()
-
-            result.Content.ReadAsStringAsync().Result |> Body
+                result.Content.ReadAsStringAsync().Result |> Body
         else
             let cookies =
                 match context.Request.Headers.TryGetValue("Cookie") with
@@ -98,7 +96,7 @@ let rec authHandler (name: string) (context: HttpContext) (cookie: StringValues 
                 | _ -> None
             //   let cookies = cookieContainer.GetCookies(baseAddress)
             match res.StatusCode with
-            | HttpStatusCode.Found -> Cookie(cookie.Value)
+            | HttpStatusCode.Found -> Redirect(cookie,res.Headers.Location.OriginalString.Replace("/auth/","") )
             | _ ->
 
                 //  cookies|> Seq.iter (fun x -> context.Response.Cookies.Append(x.Name,x.Value))
@@ -106,9 +104,18 @@ let rec authHandler (name: string) (context: HttpContext) (cookie: StringValues 
 
     match body with
     | Body str ->
+        let header =
+            httpClient
+                .GetAsync(
+                    "/auth/header"
+                )
+                .Result
+                .Content
+                .ReadAsStringAsync()
+                .Result
         let model = {| Header = header; Body = str |}
         dotLiquidHtmlTemplate "Views/Index.html" model
-    | Cookie c -> authHandler "" context (Some c)
+    | Redirect (cookie,url) -> authHandler url context cookie (Some "GET")
 
 let appHandler (name: string) (context: HttpContext) =
     let httpClient = new HttpClient()
@@ -147,17 +154,19 @@ let getAuth () = ()
 
 let POST_GET: HttpHandler = choose [ POST; GET ]
 
+let getQueryString (context:HttpContext) =
+    if context.Request.QueryString.HasValue then context.Request.QueryString.Value.ToString() else "" 
 let webApp =
     choose [ POST_GET
              >=> choose [ routexp
                               "/auth/(.*)"
-                              (fun s -> (fun x context -> (authHandler (s |> Seq.last) context None) x context))
+                              (fun s -> (fun x context -> (authHandler ((s |> Seq.last) + getQueryString context) context None None) x context))
                           route "/auth"
-                          >=> (fun x context -> (authHandler "" context None) x context)
-                          routexp "/app/(.*)"  (fun s -> (fun x context -> (appHandler (s |> Seq.last) context) x context))
-                          route "/app" >=> (fun x context -> (appHandler "" context) x context)
+                          >=> (fun x context -> (authHandler (getQueryString context) context None None) x context)
+                          routexp "/app/(.*)"  (fun s -> (fun x context -> (appHandler ((s |> Seq.last) + (getQueryString context)) context) x context))
+                          route "/app" >=> (fun x context -> (appHandler (getQueryString context) context) x context)
                           route "/"
-                          >=> (fun x context -> (authHandler "" context None) x context) ]
+                          >=> (fun x context -> (authHandler "" context None None) x context) ]
              setStatusCode 404 >=> text "Not Found" ]
 
 // ---------------------------------
